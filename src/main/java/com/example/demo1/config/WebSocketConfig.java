@@ -13,8 +13,10 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         // กำหนด URL Endpoint สำหรับให้ Client เข้ามาทักทาย (Handshake) ครั้งแรก
-        // การมี withSockJS() จะช่วยเตรียมช่องทางสำรองให้หาก Web Browser ไม่รองรับ WebSocket ล้วน
-        registry.addEndpoint("/ws").withSockJS();
+        // .setAllowedOriginPatterns("*") อนุญาตให้โดเมนอื่นๆ (เช่น Railway) เชื่อมต่อได้
+        registry.addEndpoint("/ws")
+                .setAllowedOriginPatterns("*")
+                .withSockJS();
     }
 
     @Override
