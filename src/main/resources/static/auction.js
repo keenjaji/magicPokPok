@@ -288,21 +288,30 @@ function enterGameRoom() {
 }
 
 function connectWebSocket() {
+    console.log("Connecting to WebSocket...");
     let socket = new SockJS('/ws');
     stompClient = Stomp.over(socket);
-    stompClient.debug = null;
+    stompClient.debug = null; // Set to console.log if you need to see STOMP frames
+    
     stompClient.connect({}, function (frame) {
+        console.log("Connected: " + frame);
         stompClient.subscribe('/topic/auction/' + currentGameId, function (message) {
             gameState = JSON.parse(message.body);
             renderBoard();
         });
         
+        // Initial state fetch
         fetch(`/api/auction/${currentGameId}`)
             .then(r => r.json())
-            .then(game => {
-                gameState = game;
+            .then(data => {
+                console.log("Initial state loaded", data);
+                gameState = data;
                 renderBoard();
-            });
+            })
+            .catch(err => console.error("Error fetching state:", err));
+    }, function(error) {
+        console.error("STOMP error", error);
+        // Retry logic or alert
     });
 }
 
