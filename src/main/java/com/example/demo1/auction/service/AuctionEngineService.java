@@ -94,7 +94,7 @@ public class AuctionEngineService {
     
     private void setupSubRound(AuctionGameState game, int marketSizeBase) {
         if (game.getDeck().isEmpty()) {
-            game.setPhase("ROUND_END");
+            calculateScores(game);
             return;
         }
         
