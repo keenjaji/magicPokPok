@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ประมูลชุลมุน (The Chaotic Auction)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/main.css">
+    <style>
+        .active-event-glow {
+            animation: pulse-glow 2s infinite;
+            text-shadow: 0 0 5px #fbbf24;
+        }
+        @keyframes pulse-glow {
+            0% { opacity: 0.8; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+            100% { opacity: 0.8; transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <div id="particle-bg" style="background: radial-gradient(circle at top, #1e1b4b, #000);"></div>
+
+    <div id="lobby" class="glass-panel center-modal">
+        <h1 class="glow-text" style="color: #fbbf24;">ประมูลชุลมุน 🎭</h1>
+        <p class="subtitle">A game of blind bids and chaotic consequences.</p>
+        
+        <div class="lobby-controls">
+            <input type="text" id="playerName" placeholder="Enter your name" />
+            <button id="btnCreateGame" class="btn-primary" style="background: linear-gradient(135deg, #d97706, #b45309);">Create Auction Room</button>
+            <div class="divider"><span>OR</span></div>
+            <div class="join-group">
+                <input type="text" id="joinGameId" placeholder="Room ID" />
+                <button id="btnJoinGame" class="btn-secondary">Join Room</button>
+            </div>
+        </div>
+        <a href="/" class="btn-secondary" style="display:block; margin-top:20px; text-decoration:none; padding:10px;">Back to Game Portal</a>
+    </div>
+
+    <div id="gameUI" class="hidden">
+        <div class="header-bar glass-panel">
+            <div class="room-info">Room: <strong id="displayGameId"></strong> | You: <strong id="displayPlayerName"></strong></div>
+            <div class="turn-status glow-text" id="turnIndicator" style="color:#fbbf24;">Waiting for players...</div>
+            <div class="header-actions" style="display:flex; gap:10px; align-items:center;">
+                <button id="btnToggleLang" class="btn-secondary" style="padding: 5px 10px; font-size: 0.8rem; background: rgba(255,255,255,0.1); min-width: 40px;">TH/EN</button>
+                <button id="btnShowRules" class="btn-secondary" style="padding: 5px 15px; font-size: 0.8rem; background: rgba(255,255,255,0.1);"><span data-i18n="rulesBtn">📜 กฎการเล่น</span></button>
+                <!-- Game Settings -->
+                <div id="hostSettings" style="background: rgba(0,0,0,0.4); padding: 5px 12px; border-radius: 8px; font-size: 0.8rem; display: flex; align-items: center; gap: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                    <div style="display:flex; align-items:center; gap:5px;">
+                        <label data-i18n="handSize">จำนวนไพ่:</label>
+                        <input type="number" id="inputHandSize" value="6" min="1" max="15" style="width: 45px; background: #1e293b; color: white; border: 1px solid #475569; padding: 2px; border-radius: 4px;">
+                    </div>
+                    <div style="display:flex; align-items:center; gap:5px;">
+                        <input type="checkbox" id="checkAutoHandSize" checked style="width:16px; height:16px;">
+                        <label data-i18n="autoBalance">ปรับอัตโนมัติ</label>
+                    </div>
+                </div>
+                <button id="btnStartGame" class="btn-primary hidden" style="width:auto; padding: 8px 20px;" data-i18n="startBtn">เริ่มการประมูล</button>
+            </div>
+        </div>
+        
+        <div class="main-board">
+            <!-- Top section: Master Card & Market -->
+            <div class="center-zone" style="height: 160px; justify-content: center;">
+                <div class="deck-area glass-panel" style="border-color: #3b82f6;">
+                    <h3 style="margin: 5px 0;" data-i18n="deckTitle">สำรับ</h3>
+                    <div id="deckZone" style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%;">
+                        <div class="card card-back">?</div>
+                        <div id="deckCount" style="margin-top:5px; font-size:0.8rem; color:#60a5fa;">0</div>
+                    </div>
+                </div>
+                
+                <div class="deck-area glass-panel" style="border-color: #fbbf24;">
+                    <h3 style="margin: 5px 0;" data-i18n="masterTitle">ใบสั่งการ</h3>
+                    <div id="masterCardZone" style="display:flex; justify-content:center; align-items:center; height:100%;">
+                        <div class="card card-disabled">None</div>
+                    </div>
+                </div>
+                
+                <div class="market-area glass-panel" style="flex: 0.8;">
+                    <h3 data-i18n="marketTitle">ตลาด</h3>
+                    <div class="market-cards" id="marketCards"></div>
+                </div>
+            </div>
+
+            <!-- Event Banner -->
+            <div id="eventBanner" class="hidden" style="text-align:center; padding: 8px; background: rgba(0,0,0,0.4); border: 1px solid rgba(251,191,36,0.3); border-radius: 10px; margin: -5px 10% 15px 10%; box-shadow: 0 0 15px rgba(0,0,0,0.5);">
+                <div id="eventDescription" style="font-size:0.85rem; color:#fbbf24; font-weight:bold;"></div>
+            </div>
+
+            <!-- Middle section: Active Bids -->
+            <div class="center-zone glass-panel" style="height: 160px; justify-content: center; background: rgba(0,0,0,0.4);">
+                <h3 style="position:absolute; top:10px; left:20px; color:#fbbf24; margin:0;" data-i18n="activeBids">การประมูลปัจจุบัน</h3>
+                <div id="activeBidsZone" style="display:flex; gap:20px; align-items:center; height:100%; width:100%; justify-content:center;">
+                    <!-- Bid cards injected by JS -->
+                </div>
+            </div>
+
+            <!-- Bottom section: Players (Hand & Score) -->
+            <div class="players-area" id="playersArea" style="gap: 10px;">
+                <!-- Player dashboards injected by JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- J Skill Modal -->
+    <div id="jSkillModal" class="hidden glass-panel center-modal" style="z-index: 100;">
+        <h2 style="color:#fbbf24; margin-top:0;">🃏 Jack's Trickery</h2>
+        <p>Choose 1 card from the deck to swap with 1 card in the market!</p>
+        
+        <h3 style="margin-top:20px;">1. Select Deck Card</h3>
+        <div id="jSkillDeckCards" style="display:flex; gap:10px; justify-content:center; margin-bottom: 20px;"></div>
+        
+        <h3>2. Select Market Card to Swap</h3>
+        <div id="jSkillMarketCards" style="display:flex; gap:10px; justify-content:center; margin-bottom: 20px;"></div>
+        
+        <div style="text-align:center;">
+            <button id="btnConfirmJSkill" class="btn-primary hidden" style="background:#16a34a;">Confirm Swap</button>
+        </div>
+    </div>
+
+    <!-- Rules Modal -->
+    <div id="rulesModal" class="hidden glass-panel center-modal" style="z-index: 250; width: 500px; max-height: 80vh; overflow-y: auto; text-align: left; padding: 30px;">
+        <h2 style="color:#fbbf24; margin-top:0; text-align:center;" data-i18n="rulesTitle">📜 กฎการเล่น</h2>
+        
+        <div id="rulesContent" style="font-size: 0.9rem; line-height: 1.6;">
+            <!-- Content will be injected by i18n logic in JS -->
+        </div>
+
+        <div style="text-align:center; margin-top:20px;">
+            <button id="btnCloseRules" class="btn-primary" style="background:#3b82f6;" data-i18n="closeRulesBtn">เข้าใจแล้ว!</button>
+        </div>
+    </div>
+
+    <!-- Scoreboard Modal -->
+    <div id="scoreModal" class="hidden glass-panel center-modal" style="z-index: 110; width: 400px;">
+        <h2 id="scoreTitle" style="color:#fbbf24; margin-top:0;" data-i18n="roundResultsTitle">🏆 สรุปผลการประมูล</h2>
+        <div id="scoreList" style="margin: 20px 0; text-align: left;">
+            <!-- Scores injected by JS -->
+        </div>
+        <div style="text-align:center; display:flex; gap:10px; justify-content:center;">
+            <button id="btnNextRound" class="btn-primary" style="background:#3b82f6;" data-i18n="nextRoundBtn">รอบต่อไป</button>
+            <button id="btnResetToLobby" class="btn-secondary hidden" style="background:#64748b; padding:10px;" data-i18n="playAgainBtn">เล่นอีกครั้ง</button>
+            <a href="/" id="btnBackToPortal" class="btn-secondary hidden" style="text-decoration:none; padding:10px; display:inline-block;" data-i18n="backToPortalBtn">กลับหน้าหลัก</a>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <script src="/auction.js"></script>
+</body>
+</html>

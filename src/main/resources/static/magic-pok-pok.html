@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>นักเวทย์ป็อกๆ (Magic Pok-Pok)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/main.css">
+</head>
+<body>
+    <div id="particle-bg"></div>
+
+    <div id="lobby" class="glass-panel center-modal">
+        <h1 class="glow-text">นักเวทย์ป็อกๆ 🪄</h1>
+        <p class="subtitle">A game of strategy, spells, and sudden death.</p>
+        
+        <div class="lobby-controls">
+            <input type="text" id="playerName" placeholder="Enter your wizard name" />
+            <button id="btnCreateGame" class="btn-primary">Create New Room</button>
+            <div class="divider"><span>OR</span></div>
+            <div class="join-group">
+                <input type="text" id="joinGameId" placeholder="Room ID" />
+                <button id="btnJoinGame" class="btn-secondary">Join Room</button>
+            </div>
+        </div>
+        <div id="lobbyStatus" class="status-msg"></div>
+        <a href="/" class="btn-secondary" style="display:block; margin-top:20px; text-decoration:none; padding:10px;">Back to Game Portal</a>
+    </div>
+
+    <div id="gameUI" class="hidden">
+        <div class="header-bar glass-panel">
+            <div class="room-info">Room: <strong id="displayGameId"></strong> | You: <strong id="displayPlayerName"></strong></div>
+            <div class="turn-status glow-text" id="turnIndicator">Waiting for players...</div>
+            <div class="header-actions" style="display:flex; gap:10px; align-items:center;">
+                <button id="btnRules" class="btn-secondary" style="width: auto; padding: 4px 12px; font-size:0.9rem;">📜 กติกา</button>
+                <div id="globalSilenceBadge" class="badge hidden">♣️ Global Silence</div>
+                <button id="btnStartGame" class="btn-primary hidden">Start Match</button>
+                <button id="btnEndTurn" class="btn-warning hidden">End Turn</button>
+            </div>
+        </div>
+        
+        <div class="main-board">
+            <div class="center-zone">
+                <div class="deck-area glass-panel">
+                    <h3>DECK</h3>
+                    <div class="card card-back" id="deckPile"></div>
+                    <div class="deck-count" id="deckCount">52</div>
+                </div>
+                
+                <div class="deck-area glass-panel" id="graveyardZone">
+                    <h3>GRAVE</h3>
+                    <div class="card card-disabled" id="gravePile" style="font-size:1rem;">Empty</div>
+                    <div class="deck-count" id="graveCount">0</div>
+                </div>
+                
+                <div class="market-area glass-panel">
+                    <h3>MARKET</h3>
+                    <div class="market-cards" id="marketCards">
+                        <!-- Cards injected by JS -->
+                    </div>
+                </div>
+                <div id="actionBar" class="hidden glass-panel" style="position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; align-items: center; padding: 15px 30px; z-index: 100;">
+            <span id="actionStatus">Selected: </span>
+            <button id="btnExecuteSkill" class="btn-primary" style="width: 150px;">⚡ USE SKILL</button>
+            <button id="btnCancelAction" class="btn-secondary" style="width: auto;">❌ Cancel</button>
+        </div>
+    </div>
+    
+    <div id="rulesModal" class="hidden event-overlay">
+        <div class="glass-panel bounce-in" style="width: 80%; max-width: 600px; max-height: 80vh; overflow-y: auto; text-align: left; padding: 30px;">
+            <h2 style="color:var(--primary); margin-top:0;">📜 กติกาและความสามารถการ์ด</h2>
+            <ul style="line-height:1.6; color:#ddd; padding-left:20px;">
+                <li><b>A (1 Action):</b> สะสมพลังงานให้ K (ใช้ได้ครั้งเดียวค้างไว้)</li>
+                <li><b>K (2 Actions):</b> โจมตีปิดเกม (Sudden Death) หากมี A กางอยู่</li>
+                <li><b>J (1 Action):</b> ทำลายไพ่เลข (2-10) คู่แข่ง หรือ พลีชีพตัวเองรับประกันทำลาย J,Q,K คู่แข่ง 1 ใบ</li>
+                <li><b>Q (1 Action):</b> ขโมยไพ่คู่แข่ง 1 ใบ (ถ้าขโมยหน้าคนมาซ้ำ ทิ้งลงสุสานทันที)</li>
+                <li><b>2 (1 Action):</b> ขโมยไพ่แต้มสูงสุดไปล็อคคะแนนบนบอร์ดตัวเอง</li>
+                <li><b>3 (1 Action):</b> ใบ้เป้าหมาย 1 เทิร์น (ห้ามใช้ J,Q,K)</li>
+                <li><b>4 (1 Action):</b> สุ่มจั่วไพ่ 1 ใบจากในกอง</li>
+                <li><b>5 (1 Action):</b> รีเฟรชตลาด เปลี่ยนไพ่ 5 ใบ</li>
+                <li><b>6 (1 Action):</b> ขุดไพ่ 3,5,7,9 จากสุสาน (จำกัด 1ครั้ง/เทิร์น)</li>
+                <li><b>7 (1 Action):</b> สโลว์เป้าหมาย (เทิร์นหน้ามีแค่ 1 Action)</li>
+                <li><b>8 (1 Action):</b> ได้รับเพิ่ม 2 Actions ประจำเทิร์น</li>
+                <li><b>9 (1 Action):</b> ขุดไพ่ J,Q,K จากสุสาน (จำกัด 1ครั้ง/เทิร์น)</li>
+                <li><b>10 (1 Action):</b> ขุดไพ่ 2,4,8 จากสุสาน (จำกัด 1ครั้ง/เทิร์น)</li>
+            </ul>
+            <button id="btnCloseRules" class="btn-secondary" style="margin-top:20px;">ปิดหน้าต่าง</button>
+        </div>
+    </div>
+    
+    <div id="graveyardModal" class="hidden event-overlay">
+        <div class="glass-panel bounce-in" style="width: 90%; max-width: 800px; max-height: 80vh; display: flex; flex-direction: column; padding: 20px;">
+            <h2 style="color:var(--primary); margin-top:0; text-align:center;">⚰️ สุสาน (Graveyard)</h2>
+            <div id="graveyardMessage" style="text-align:center; color:#ccc; margin-bottom: 10px;"></div>
+            <div id="graveyardGrid" class="market-cards" style="flex:1; overflow-y:auto; justify-content:center; flex-wrap:wrap;">
+                <!-- Cards injected by JS -->
+            </div>
+            <button id="btnCloseGraveyard" class="btn-secondary" style="margin-top:20px; align-self:center;">ปิดหน้าต่าง</button>
+        </div>
+    </div>
+    
+    <div id="duplicateDiscardModal" class="hidden event-overlay" style="z-index: 200;">
+        <div class="glass-panel bounce-in" style="width: 80%; max-width: 500px; text-align: center; padding: 30px; border: 2px solid #ef4444;">
+            <h2 style="color:#ef4444; margin-top:0;">⚠️ พบไพ่ตัวละครซ้ำ!</h2>
+            <p>คุณมีไพ่ตัวละคร (J, Q, K) หน้าซ้ำกันบนบอร์ด กรุณาเลือกไพ่ 1 ใบเพื่อทิ้งลงสุสานทันที</p>
+            <div id="duplicateCardsContainer" class="market-cards" style="justify-content:center; margin-top:20px;">
+                <!-- Cards injected by JS -->
+            </div>
+        </div>
+    </div>
+
+            <div class="players-area" id="playersArea">
+                <!-- Player dashboards injected by JS -->
+            </div>
+        </div>
+    </div>
+    
+    <div id="eventOverlay" class="hidden event-overlay">
+        <div class="event-content glass-panel bounce-in">
+            <h2 id="eventHeadline">A-PHET!</h2>
+            <p id="eventText"></p>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <script src="/app.js"></script>
+</body>
+</html>
