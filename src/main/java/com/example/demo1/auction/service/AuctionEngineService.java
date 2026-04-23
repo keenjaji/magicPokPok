@@ -356,19 +356,21 @@ public class AuctionEngineService {
     }
     
     private void finishSubRoundForPlayer(AuctionPlayer p, AuctionGameState game, AuctionCard marketCard) {
+        // Everyone adds their bid card to score pile
+        AuctionCard bidCard = p.getCurrentBid();
+        if (bidCard != null) {
+            if (p.isUnderdog() && !game.isBlackEvent()) {
+                bidCard.setDoubleScore(true);
+                if (bidCard.getRank() == 1) {
+                    bidCard.setAceUnderdog(true);
+                }
+            }
+            p.getScorePile().add(bidCard);
+        }
+
+        // Winners also add market card
         if (marketCard != null) {
             p.getScorePile().add(marketCard);
-        } else {
-            AuctionCard bidCard = p.getCurrentBid();
-            if (bidCard != null) {
-                if (p.isUnderdog() && !game.isBlackEvent()) {
-                    bidCard.setDoubleScore(true);
-                    if (bidCard.getRank() == 1) {
-                        bidCard.setAceUnderdog(true);
-                    }
-                }
-                p.getScorePile().add(bidCard);
-            }
         }
         p.setHasPickedMarket(true);
     }
@@ -499,6 +501,15 @@ public class AuctionEngineService {
         game.setMasterCard(master);
         applyMasterCardEvent(game, master);
         
+        // Deduplicate deck against ALL cards currently in players' hands (Legacy cards)
+        for (AuctionPlayer p : game.getPlayers()) {
+            for (AuctionCard handCard : p.getHand()) {
+                final int rank = handCard.getRank();
+                final AuctionSuit suit = handCard.getSuit();
+                game.getDeck().removeIf(c -> c.getRank() == rank && c.getSuit() == suit);
+            }
+        }
+
         int n = game.getPlayers().size();
         int baseHandSize = game.getInitialHandSize();
         int marketSize = n - 1;
@@ -512,7 +523,7 @@ public class AuctionEngineService {
         }
         
         for (AuctionPlayer p : game.getPlayers()) {
-            p.getHand().clear();
+            p.getHand().clear(); // Clear hand first to avoid duplicates
             p.setCurrentBid(null);
             p.setRoundScore(0);
             
@@ -520,6 +531,7 @@ public class AuctionEngineService {
             if (p.isRich()) targetHandSize--; 
             if (p.isPoor()) targetHandSize++;
             
+            // Extract Legacy Card before clearing score pile
             if (p.getLegacyCardId() != null) {
                 final String lid = p.getLegacyCardId();
                 AuctionCard legacy = p.getScorePile().stream()
@@ -529,16 +541,19 @@ public class AuctionEngineService {
                     legacy.setDoubleScore(false);
                     legacy.setAceUnderdog(false);
                     p.getHand().add(legacy);
-                    game.getDeck().removeIf(c -> c.getRank() == legacy.getRank() && c.getSuit() == legacy.getSuit());
                 }
                 p.setLegacyCardId(null);
             }
             
             p.getScorePile().clear();
 
+            // Draw until reaching targetHandSize
             while (p.getHand().size() < targetHandSize && !game.getDeck().isEmpty()) {
                 p.getHand().add(game.getDeck().remove(0));
             }
+            
+            p.setRich(false);
+            p.setPoor(false);
         }
         
         setupSubRound(game, marketSize);
