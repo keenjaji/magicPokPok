@@ -356,22 +356,21 @@ public class AuctionEngineService {
     }
     
     private void finishSubRoundForPlayer(AuctionPlayer p, AuctionGameState game, AuctionCard marketCard) {
-        // Everyone adds their bid card to score pile
         AuctionCard bidCard = p.getCurrentBid();
-        if (bidCard != null) {
-            if (p.isUnderdog() && !game.isBlackEvent()) {
-                bidCard.setDoubleScore(true);
-                if (bidCard.getRank() == 1) {
-                    bidCard.setAceUnderdog(true);
-                }
+        
+        if (marketCard != null) {
+            // Player won a card from the market
+            p.getScorePile().add(marketCard);
+            // Bid card is discarded (not added to score pile)
+        } else if (bidCard != null && p.isUnderdog() && !game.isBlackEvent()) {
+            // Player is Underdog and didn't get a market card
+            bidCard.setDoubleScore(true);
+            if (bidCard.getRank() == 1) {
+                bidCard.setAceUnderdog(true);
             }
             p.getScorePile().add(bidCard);
         }
-
-        // Winners also add market card
-        if (marketCard != null) {
-            p.getScorePile().add(marketCard);
-        }
+        
         p.setHasPickedMarket(true);
     }
     
