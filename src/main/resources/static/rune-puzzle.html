@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rune Puzzle - Elemental Battle</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/main.css">
+    <style>
+        /* Specific tweaks for Rune Puzzle if needed */
+        .rune-card-mini {
+            width: 70px; height: 100px; font-size: 1rem;
+        }
+        .element-fire { background: linear-gradient(135deg, #f87171, #991b1b); color: white; }
+        .element-water { background: linear-gradient(135deg, #60a5fa, #1e3a8a); color: white; }
+        .element-earth { background: linear-gradient(135deg, #a16207, #451a03); color: white; }
+        .element-air { background: linear-gradient(135deg, #cbd5e1, #475569); color: #0f172a; }
+        .element-light { background: linear-gradient(135deg, #fef08a, #d97706); color: #0f172a; }
+        .element-dark { background: linear-gradient(135deg, #6b21a8, #312e81); color: white; }
+        
+        .waiting-room {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100%; gap: 20px;
+        }
+        .player-list-item {
+            padding: 15px 30px; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border);
+            border-radius: 8px; width: 300px; display: flex; justify-content: space-between; align-items: center;
+        }
+        
+        .hp-bar { height: 10px; background: #334155; border-radius: 5px; overflow: hidden; margin-top: 5px; }
+        .hp-fill { height: 100%; background: #ef4444; transition: width 0.3s; }
+        .mana-bar { height: 10px; background: #334155; border-radius: 5px; overflow: hidden; margin-top: 5px; }
+        .mana-fill { height: 100%; background: #3b82f6; transition: width 0.3s; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- Lobby / Entry UI -->
+        <div id="lobby" v-if="!isInRoom" class="glass-panel center-modal">
+            <h1 class="glow-text">Rune Puzzle 🧩</h1>
+            <p class="subtitle">Elemental Strategic Battle</p>
+            
+            <div class="lobby-controls">
+                <input v-model="playerName" placeholder="นามแฝงของท่าน" />
+                <button @click="createGame" class="btn-primary">สร้างอาณาจักรใหม่</button>
+                <div class="divider"><span>หรือ</span></div>
+                <div class="join-group">
+                    <input v-model="gameIdInput" placeholder="รหัสห้อง (Room ID)" />
+                    <button @click="joinGame()" class="btn-secondary">เข้าร่วมอาณาจักร</button>
+                </div>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:20px; width:100%;">
+                <a href="/" class="btn-secondary" style="flex:1; text-align:center; text-decoration:none; padding:10px;">กลับสู่หน้าหลัก</a>
+                <button @click="showRules = true" class="btn-warning" style="flex:1; padding:10px;">📜 กติกา (Rules)</button>
+            </div>
+        </div>
+
+        <!-- Main Game UI -->
+        <div id="gameUI" v-if="isInRoom">
+            <div class="header-bar glass-panel">
+                <div class="room-info">Room: <strong style="color:var(--primary);">{{ gameId }}</strong> | You: <strong style="color:var(--primary);">{{ playerName }}</strong></div>
+                <div class="turn-status glow-text">{{ statusText }}</div>
+                <div class="header-actions">
+                    <button @click="showRules = true" class="btn-secondary" style="width:auto; padding: 8px 15px; margin-right:10px;">📜 กติกา</button>
+                    <button v-if="phase === 'LOBBY' && players.length >= 2" @click="startGame" class="btn-primary" style="width:auto; padding: 8px 20px;">เริ่มการต่อสู้</button>
+                    <button v-if="phase === 'PLAY' && isMyTurn" @click="endTurn" class="btn-warning">จบเทิร์น</button>
+                </div>
+            </div>
+
+            <!-- Waiting Room Sub-view -->
+            <div v-if="phase === 'LOBBY'" class="main-board">
+                <div class="waiting-room glass-panel" style="padding: 50px;">
+                    <h2 class="glow-text">รอเหล่านักรบเข้าร่วม...</h2>
+                    <p>รหัสห้องของท่านคือ: <strong style="font-size: 2rem; color: #60a5fa;">{{ gameId }}</strong></p>
+                    <div style="display:flex; flex-direction:column; gap:10px; margin-top: 20px;">
+                        <div v-for="p in players" :key="p.id" class="player-list-item">
+                            <span>🛡️ {{ p.name }}</span>
+                            <span v-if="p.name === playerName" style="font-size:0.7rem; color:var(--text-muted);">(คุณ)</span>
+                            <span style="color:#22c55e;">พร้อมแล้ว</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Gameplay Sub-view -->
+            <div v-if="phase === 'PLAY' || phase === 'END'" class="main-board">
+                <div class="players-area">
+                    <div v-for="p in players" :key="p.id" 
+                         :class="['player-dashboard', 'glass-panel', { 'active-turn': p.id === activePlayerId }]">
+                        
+                        <div class="player-header">
+                            <span>{{ p.name }} <span v-if="p.id === activePlayerId">⚔️</span></span>
+                            <span>{{ p.id === currentPlayerId ? '(คุณ)' : '' }}</span>
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <div style="display:flex; justify-content:space-between; font-size:0.8rem;">
+                                <span>พลังชีวิต (HP)</span>
+                                <span>{{ p.health }}/30</span>
+                            </div>
+                            <div class="hp-bar"><div class="hp-fill" :style="{ width: (p.health/30*100) + '%' }"></div></div>
+                            
+                            <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-top:5px;">
+                                <span>มานา (Mana)</span>
+                                <span>{{ p.mana }}/10</span>
+                            </div>
+                            <div class="mana-bar"><div class="mana-fill" :style="{ width: (p.mana/10*100) + '%' }"></div></div>
+                            
+                            <div v-if="p.shield > 0" style="margin-top:5px; color:#fbbf24; font-size:0.9rem;">
+                                🛡️ โล่ป้องกัน: {{ p.shield }}
+                            </div>
+                        </div>
+
+                        <div class="player-board">
+                            <div v-for="card in p.hand" :key="card.id" 
+                                 :class="['card', 'rune-card-mini', getElementClass(card.runeType)]"
+                                 @click="playCard(card.id)">
+                                <div style="font-size:1.5rem;">{{ getIcon(card.runeType) }}</div>
+                                <div style="font-size:0.5rem; text-transform:uppercase;">{{ card.runeType }}</div>
+                                <div style="font-size:0.7rem; margin-top:5px;">{{ card.power }}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- End Game Overlay -->
+        <div v-if="phase === 'END'" class="event-overlay">
+            <div class="bounce-in">
+                <h2 id="eventHeadline">ผลการต่อสู้!</h2>
+                <p id="eventText">{{ logs[logs.length-1] }}</p>
+                <button @click="window.location.reload()" class="btn-primary" style="margin-top:20px; width:200px;">กลับสู่หน้าล็อบบี้</button>
+            </div>
+        </div>
+
+        <!-- Rules Modal -->
+        <div v-if="showRules" class="event-overlay" style="z-index: 100;">
+            <div class="glass-panel bounce-in" style="max-width: 550px; text-align: left; padding: 30px;">
+                <h2 class="glow-text" style="text-align: center; margin-bottom: 20px;">🧩 กติการู่นพัซเซิล (Rune Puzzle)</h2>
+                <p><strong>เป้าหมาย:</strong> บริหารจัดการพลังงานธาตุ (Mana) เพื่อร่ายรูนและลดพลังชีวิต (HP) คู่แข่งให้เหลือ 0</p>
+                <hr style="border-color: var(--glass-border); margin: 15px 0;">
+                <h3 style="color: var(--primary);">🧪 ประเภทและผลของรูน</h3>
+                <p style="font-size: 0.8rem; color: #94a3b8; margin-top: -5px; margin-bottom: 5px;">*ความรุนแรงของผลลัพธ์ขึ้นอยู่กับค่า Power ของการ์ด*</p>
+                <ul style="line-height: 1.8; margin-top: 5px; padding-left: 20px; font-size: 0.95rem;">
+                    <li><span style="color:#f87171;">🔥 Fire (ไฟ):</span> โจมตีคู่แข่งเท่ากับ <strong style="color:white;">Power x 2</strong></li>
+                    <li><span style="color:#60a5fa;">💧 Water (น้ำ):</span> ฟื้นฟู HP ตัวเอง <strong style="color:white;">Power x 2</strong> และจั่วไพ่ 1 ใบ</li>
+                    <li><span style="color:#fbbf24;">🪨 Earth (ดิน):</span> สร้างโล่ป้องกัน (Shield) <strong style="color:white;">Power x 3</strong></li>
+                    <li><span style="color:#94a3b8;">💨 Air (ลม):</span> ได้ Mana เพิ่มเท่ากับ <strong style="color:white;">Power</strong> และจั่วไพ่ 2 ใบ</li>
+                    <li><span style="color:#fef08a;">✨ Light (แสง):</span> โจมตีคู่แข่ง + ฟื้นฟู HP ตัวเอง อย่างละเท่ากับ <strong style="color:white;">Power</strong></li>
+                    <li><span style="color:#c084fc;">🌑 Dark (มืด):</span> โจมตี <strong style="color:white;">Power x 2</strong> และ <strong style="color:#ef4444;">ลด Mana คู่แข่ง 1 หน่วย</strong> (ขัดขวางจังหวะ)</li>
+                </ul>
+                <div style="text-align: center; margin-top: 30px;">
+                    <button @click="showRules = false" class="btn-primary" style="width: 150px;">เข้าใจแล้ว</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toasts & Logs -->
+        <div id="toastContainer">
+            <div v-for="t in toasts" :key="t.id" :class="['toast', t.type]">{{ t.msg }}</div>
+        </div>
+
+        <div id="actionLog" class="glass-panel">
+            <div class="log-header">📜 บันทึกสงคราม</div>
+            <div id="logContent">
+                <div v-for="(log, idx) in logs" :key="idx">
+                    <span style="color:var(--primary); font-size:0.7rem;">[{{ getTime() }}]</span> {{ log }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script>
+        const { createApp } = Vue;
+        createApp({
+            data() {
+                return {
+                    gameId: '', gameIdInput: '', playerName: 'Player',
+                    players: [], phase: 'LOBBY',
+                    currentPlayerId: '', activePlayerId: '', 
+                    logs: [], toasts: [],
+                    stompClient: null,
+                    isInRoom: false,
+                    showRules: false
+                }
+            },
+            computed: {
+                isMyTurn() {
+                    return this.currentPlayerId === this.activePlayerId;
+                },
+                statusText() {
+                    if (this.phase === 'LOBBY') return 'รอรวมพล...';
+                    if (this.phase === 'END') return 'จบการต่อสู้';
+                    return this.isMyTurn ? 'ตาของท่านแล้ว!' : 'รอคู่ต่อสู้ร่ายรูน...';
+                }
+            },
+            methods: {
+                async createGame() {
+                    try {
+                        const res = await fetch('/api/rune/create', { method: 'POST' });
+                        const data = await res.json();
+                        this.gameId = data.gameId;
+                        this.joinGame(data.gameId);
+                    } catch (e) {
+                        this.showToast("เกิดข้อผิดพลาดในการสร้างห้อง", "error");
+                    }
+                },
+                async joinGame(idOverride = null) {
+                    const id = idOverride || this.gameIdInput;
+                    if (!id) {
+                        alert("กรุณาระบุรหัสห้องพ่ะย่ะค่ะ!");
+                        return;
+                    }
+                    try {
+                        const res = await fetch(`/api/rune/join/${id}?playerName=${encodeURIComponent(this.playerName)}`, { method: 'POST' });
+                        if (!res.ok) throw new Error("Join failed");
+                        
+                        const text = await res.text();
+                        if (!text || text === "null") {
+                            alert("ไม่พบห้องที่ระบุพ่ะย่ะค่ะ!");
+                            return;
+                        }
+                        
+                        const data = JSON.parse(text);
+                        this.gameId = data.gameId;
+                        this.isInRoom = true;
+                        this.connectWebSocket(data.gameId);
+                    } catch (e) { 
+                        console.error(e);
+                        this.showToast("เกิดข้อผิดพลาดในการเข้าห้อง", "error");
+                    }
+                },
+                connectWebSocket(gameId) {
+                    const socket = new SockJS('/ws');
+                    this.stompClient = Stomp.over(socket);
+                    this.stompClient.debug = null;
+                    this.stompClient.connect({}, (frame) => {
+                        this.stompClient.subscribe('/topic/rune/' + gameId, (msg) => {
+                            this.updateState(JSON.parse(msg.body));
+                        });
+                        this.refresh();
+                    });
+                },
+                updateState(data) {
+                    const oldPhase = this.phase;
+                    this.players = data.players;
+                    this.gameId = data.gameId;
+                    this.phase = data.phase;
+                    this.activePlayerId = data.activePlayerId;
+                    this.logs = data.logs;
+                    
+                    if (this.phase === 'PLAY' && oldPhase === 'LOBBY') {
+                        this.showToast("การต่อสู้เริ่มต้นขึ้นแล้ว!", "success");
+                    }
+
+                    if (!this.currentPlayerId && this.players.length > 0) {
+                        this.currentPlayerId = this.players.find(p => p.name === this.playerName)?.id;
+                    }
+                    this.$nextTick(() => {
+                        const el = document.getElementById('logContent');
+                        if (el) el.scrollTop = el.scrollHeight;
+                    });
+                },
+                async startGame() {
+                    await fetch(`/api/rune/${this.gameId}/start`, { method: 'POST' });
+                },
+                async playCard(cardId) {
+                    if (!this.isMyTurn) return;
+                    await fetch(`/api/rune/${this.gameId}/play?playerId=${this.currentPlayerId}&cardId=${cardId}`, { method: 'POST' });
+                },
+                async endTurn() {
+                    if (!this.isMyTurn) return;
+                    await fetch(`/api/rune/${this.gameId}/end-turn?playerId=${this.currentPlayerId}`, { method: 'POST' });
+                },
+                async refresh() {
+                    const res = await fetch(`/api/rune/${this.gameId}`);
+                    this.updateState(await res.json());
+                },
+                getElementClass(type) {
+                    return 'element-' + type.toLowerCase();
+                },
+                getIcon(type) {
+                    const icons = { FIRE:'🔥', WATER:'💧', EARTH:'🪨', AIR:'💨', LIGHT:'✨', DARK:'🌑' };
+                    return icons[type] || '❓';
+                },
+                getTime() {
+                    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                },
+                showToast(msg, type = 'info') {
+                    const id = Date.now();
+                    this.toasts.push({ id, msg, type });
+                    setTimeout(() => {
+                        this.toasts = this.toasts.filter(t => t.id !== id);
+                    }, 4000);
+                }
+            }
+        }).mount('#app')
+    </script>
+</body>
+</html>

@@ -18,7 +18,7 @@ public class TurnEngineService {
     }
 
     public void takeFromMarket(GameState game, Player player, String cardId) {
-        if (player.getActionsLeft() < 1) return;
+        if (player.getActionsLeft() < 1 || game.isGameOver()) return;
         
         Optional<Card> marketCardOpt = game.getMarket().stream()
                 .filter(c -> c.getId().equals(cardId))
@@ -30,11 +30,19 @@ public class TurnEngineService {
             game.getMarket().remove(card);
             player.getBoard().add(card);
             player.setActionsLeft(player.getActionsLeft() - 1);
+            
+            // Check for duplicates
+            if (hasCharacterDuplicates(player)) {
+                player.setMustDiscard(true);
+            }
+            
             gameService.refillMarket(game); // Ensure market has 5 cards
         }
     }
 
     public boolean useSkill(GameState game, Player player, ActionCommand cmd) {
+        if (game.isGameOver()) return false;
+
         // Find source card on player's board
         Optional<Card> sourceCardOpt = player.getBoard().stream()
                 .filter(c -> c.getId().equals(cmd.getSourceCardId()))
@@ -65,8 +73,8 @@ public class TurnEngineService {
                 if (player.getActionsLeft() >= 2) {
                     boolean hasTappedA = player.getBoard().stream().anyMatch(c -> c.getRank() == 1 && c.isTapped());
                     if (hasTappedA) {
-                        // VICTORY! Handled by controller/broadcaster
-                        player.setActionsLeft(0); // Optional: signal end
+                        game.setGameOver(true);
+                        game.setWinnerId(player.getId());
                         success = true;
                     }
                 }
@@ -95,7 +103,7 @@ public class TurnEngineService {
                     if (success) {
                         player.setActionsLeft(player.getActionsLeft() - 1);
                         player.getBoard().remove(card);
-                        game.getGraveyard().add(card);
+                        moveToGraveyardOrExile(game, card);
                     }
                 }
                 break;
@@ -114,19 +122,17 @@ public class TurnEngineService {
 
         if (targetOpt.isPresent()) {
             Card target = targetOpt.get();
-            // J destroys 2-10 (numbers) -> Just destroy target
-            // OR J self-destructs to destroy J, Q, K
             if (target.getType() == CardType.NUMBER) {
                 targetPlayer.getBoard().remove(target);
-                game.getGraveyard().add(target);
+                moveToGraveyardOrExile(game, target);
                 return true;
             } else if (target.getType() == CardType.CHARACTER) {
                 // Self destruct J
                 player.getBoard().remove(jack);
-                game.getGraveyard().add(jack);
+                moveToGraveyardOrExile(game, jack);
                 // Destroy target
                 targetPlayer.getBoard().remove(target);
-                game.getGraveyard().add(target);
+                moveToGraveyardOrExile(game, target);
                 return true;
             }
         }
@@ -135,7 +141,7 @@ public class TurnEngineService {
 
     private boolean executeQueenSkill(GameState game, Player player, ActionCommand cmd) {
         Player targetPlayer = getPlayerById(game, cmd.getTargetPlayerId());
-        if (targetPlayer == null) return false;
+        if (targetPlayer == null || targetPlayer.getId().equals(player.getId())) return false;
 
         Optional<Card> targetOpt = targetPlayer.getBoard().stream()
                 .filter(c -> c.getId().equals(cmd.getTargetCardId()))
@@ -144,7 +150,14 @@ public class TurnEngineService {
         if (targetOpt.isPresent()) {
             Card stolen = targetOpt.get();
             targetPlayer.getBoard().remove(stolen);
+            stolen.setTapped(true); // Queen Nerf: Stolen card is tapped (cannot use immediately)
             player.getBoard().add(stolen);
+            
+            // Check for duplicates
+            if (hasCharacterDuplicates(player)) {
+                player.setMustDiscard(true);
+            }
+            
             return true;
         }
         return false;
@@ -152,16 +165,10 @@ public class TurnEngineService {
 
     private boolean executeNumberSkill(GameState game, Player player, Card spell, ActionCommand cmd) {
         Player targetPlayer = getPlayerById(game, cmd.getTargetPlayerId());
-        Card targetCard = null;
-        if (targetPlayer != null && cmd.getTargetCardId() != null) {
-            targetCard = targetPlayer.getBoard().stream()
-                    .filter(c -> c.getId().equals(cmd.getTargetCardId()))
-                    .findFirst().orElse(null);
-        }
-
+        
         switch (spell.getRank()) {
-            case 2: // Curse (Steal highest point, default lock)
-                if (targetPlayer != null) {
+            case 2: // Curse
+                if (targetPlayer != null && !targetPlayer.getId().equals(player.getId())) {
                     Card maxPointCard = null;
                     for (Card c : targetPlayer.getBoard()) {
                         if (c.getType() == CardType.NUMBER && (maxPointCard == null || c.getRank() > maxPointCard.getRank())) {
@@ -192,20 +199,32 @@ public class TurnEngineService {
                 }
                 return false;
 
-            case 5: // Refresh
+            case 5: // Refresh & Cleanse
                 game.getMarket().clear();
                 gameService.refillMarket(game);
+                // Also cleanse target player (or self if no target)
+                Player cleanseTarget = targetPlayer != null ? targetPlayer : player;
+                for (Card c : cleanseTarget.getBoard()) {
+                    c.setDisabled(false);
+                }
                 return true;
 
             case 6: // Odd Dig (3,5,7,9)
                 if (player.isHasDugThisTurn()) return false;
                 
-                List<Card> oddTargets = game.getGraveyard().stream()
-                        .filter(c -> List.of(3,5,7,9).contains(c.getRank()))
-                        .collect(java.util.stream.Collectors.toList());
+                Card oddTarget = null;
+                if (cmd.getTargetCardId() != null) {
+                    oddTarget = findTargetInGraveyard(game, cmd.getTargetCardId(), List.of(3,5,7,9));
+                } else {
+                    List<Card> oddTargets = game.getGraveyard().stream()
+                            .filter(c -> List.of(3,5,7,9).contains(c.getRank()))
+                            .collect(java.util.stream.Collectors.toList());
+                    if (!oddTargets.isEmpty()) {
+                        oddTarget = oddTargets.get(random.nextInt(oddTargets.size()));
+                    }
+                }
                         
-                if (!oddTargets.isEmpty()) {
-                    Card oddTarget = oddTargets.get(random.nextInt(oddTargets.size()));
+                if (oddTarget != null) {
                     game.getGraveyard().remove(oddTarget);
                     oddTarget.setResurrected(true);
                     player.getBoard().add(oddTarget);
@@ -221,29 +240,23 @@ public class TurnEngineService {
                 }
                 return false;
 
-            case 8: // Haste
-                player.setActionsLeft(player.getActionsLeft() + 2);
+            case 8: // Haste (Nerf: +1 Action)
+                player.setActionsLeft(player.getActionsLeft() + 1);
                 return true;
 
             case 9: // Revive J, Q, K
                 if (player.isHasDugThisTurn() || cmd.getTargetCardId() == null) return false;
                 
-                // Filter ranks that player does not already have
-                List<Integer> missingChars = new java.util.ArrayList<>();
-                for (int r : List.of(11, 12, 13)) {
-                    int checkR = r;
-                    if (player.getBoard().stream().noneMatch(c -> c.getRank() == checkR)) {
-                        missingChars.add(r);
-                    }
-                }
-                if (missingChars.isEmpty()) return false;
-
-                Card charTarget = findTargetInGraveyard(game, cmd.getTargetCardId(), missingChars);
+                Card charTarget = findTargetInGraveyard(game, cmd.getTargetCardId(), List.of(11, 12, 13));
                 if (charTarget != null) {
                     game.getGraveyard().remove(charTarget);
                     charTarget.setResurrected(true);
                     player.getBoard().add(charTarget);
                     player.setHasDugThisTurn(true);
+                    
+                    if (hasCharacterDuplicates(player)) {
+                        player.setMustDiscard(true);
+                    }
                     return true;
                 }
                 return false;
@@ -265,41 +278,66 @@ public class TurnEngineService {
     }
 
     public String endTurn(GameState game, EventProcessorService eventProcessor) {
-        if (game.getPlayers().isEmpty()) return "no_players";
+        if (game.getPlayers().isEmpty() || game.isGameOver()) return "no_players";
         
         Player currentPlayer = game.getPlayers().get(game.getCurrentPlayerIdx());
-        // Clean up current player end of turn states
         currentPlayer.setSilenced(false); 
 
-        // Move to next player
         int nextPlayerIdx = (game.getCurrentPlayerIdx() + 1) % game.getPlayers().size();
         game.setCurrentPlayerIdx(nextPlayerIdx);
         
         Player nextPlayer = game.getPlayers().get(nextPlayerIdx);
 
-        // Prep next player turn
         nextPlayer.setActionsLeft(nextPlayer.isSlowed() ? 1 : 2);
-        nextPlayer.setSlowed(false); // consume slow effect
+        nextPlayer.setSlowed(false);
         nextPlayer.setHasDugThisTurn(false);
         
-        // Untap Character cards at the start of their turn (A cards stay tapped)
         for (Card c : nextPlayer.getBoard()) {
-            if (c.getType() == CardType.CHARACTER) {
-                c.setTapped(false);
-            }
+            c.setTapped(false);
         }
 
         String eventMessage = "Turn ended.";
 
-        // If nextPlayer wraps to 0 -> Round ends! A-Phet sequence triggers here
         if (nextPlayerIdx == 0) {
-            // Turn off global silence from last round
             game.setGlobalSilence(false);
-            
+            if (game.getDeck().isEmpty()) {
+                calculateFinalScores(game);
+                return "สำรับหมดแล้ว! ตัดสินผู้ชนะด้วยคะแนนรวม";
+            }
             eventMessage = eventProcessor.triggerAPhet(game);
         }
         
         return eventMessage;
+    }
+
+    private void calculateFinalScores(GameState game) {
+        game.setGameOver(true);
+        Player winner = null;
+        int maxScore = -1;
+        for (Player p : game.getPlayers()) {
+            int score = 0;
+            for (Card c : p.getBoard()) {
+                if (c.getType() == CardType.NUMBER && !c.isDisabled()) {
+                    score += c.getRank();
+                }
+            }
+            p.setScore(score);
+            if (score > maxScore) {
+                maxScore = score;
+                winner = p;
+            }
+        }
+        if (winner != null) {
+            game.setWinnerId(winner.getId());
+        }
+    }
+
+    private void moveToGraveyardOrExile(GameState game, Card card) {
+        if (card.isResurrected()) {
+            // EXILE: Card is removed from play entirely
+            return;
+        }
+        game.getGraveyard().add(card);
     }
 
     public boolean hasCharacterDuplicates(Player player) {
@@ -318,7 +356,11 @@ public class TurnEngineService {
                 
         if (cardToDiscard.isPresent()) {
             player.getBoard().remove(cardToDiscard.get());
-            game.getGraveyard().add(cardToDiscard.get());
+            moveToGraveyardOrExile(game, cardToDiscard.get());
+            
+            if (!hasCharacterDuplicates(player)) {
+                player.setMustDiscard(false);
+            }
         }
     }
 

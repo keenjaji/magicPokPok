@@ -11,6 +11,8 @@ public class GameState {
     private List<Card> deck;
     private List<Card> graveyard;
     private boolean globalSilence;
+    private boolean isGameOver;
+    private String winnerId;
 
     public GameState() {
         this.players = new ArrayList<>();
@@ -19,6 +21,7 @@ public class GameState {
         this.graveyard = new ArrayList<>();
         this.currentPlayerIdx = 0;
         this.globalSilence = false;
+        this.isGameOver = false;
     }
 
     public GameState(String gameId) {
@@ -46,4 +49,10 @@ public class GameState {
 
     public boolean isGlobalSilence() { return globalSilence; }
     public void setGlobalSilence(boolean globalSilence) { this.globalSilence = globalSilence; }
+
+    public boolean isGameOver() { return isGameOver; }
+    public void setGameOver(boolean gameOver) { isGameOver = gameOver; }
+
+    public String getWinnerId() { return winnerId; }
+    public void setWinnerId(String winnerId) { this.winnerId = winnerId; }
 }

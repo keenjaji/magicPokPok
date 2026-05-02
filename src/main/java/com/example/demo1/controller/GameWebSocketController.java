@@ -45,7 +45,7 @@ public class GameWebSocketController {
         String eventMsg = "";
 
         // Block everything if player has pending duplicates (unless they are executing DISCARD_DUPLICATE)
-        if (!"DISCARD_DUPLICATE".equals(cmd.getActionType()) && turnEngine.hasCharacterDuplicates(currentPlayer)) {
+        if (!"DISCARD_DUPLICATE".equals(cmd.getActionType()) && currentPlayer.isMustDiscard()) {
             return; // Ignore action, wait for discard
         }
 

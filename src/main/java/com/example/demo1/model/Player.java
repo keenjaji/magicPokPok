@@ -11,6 +11,7 @@ public class Player {
     private boolean isSlowed;
     private int score;
     private boolean hasDugThisTurn;
+    private boolean mustDiscard;
     private List<Card> board;
 
     public Player() {
@@ -18,6 +19,7 @@ public class Player {
         this.isSilenced = false;
         this.isSlowed = false;
         this.hasDugThisTurn = false;
+        this.mustDiscard = false;
         this.score = 0;
         this.board = new ArrayList<>();
     }
@@ -45,6 +47,9 @@ public class Player {
 
     public boolean isHasDugThisTurn() { return hasDugThisTurn; }
     public void setHasDugThisTurn(boolean hasDugThisTurn) { this.hasDugThisTurn = hasDugThisTurn; }
+
+    public boolean isMustDiscard() { return mustDiscard; }
+    public void setMustDiscard(boolean mustDiscard) { this.mustDiscard = mustDiscard; }
 
     public int getScore() { return score; }
     public void setScore(int score) { this.score = score; }

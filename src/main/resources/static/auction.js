@@ -4,6 +4,46 @@ let myPlayerId = null;
 let myPlayerName = null;
 let gameState = null;
 
+function getCardName(card) {
+    if (!card) return "Unknown Card";
+    if (card.faceDown) return "Mystery Card";
+    let suit = '♠';
+    if(card.suit === 'HEART') suit = '♥';
+    else if(card.suit === 'DIAMOND') suit = '♦';
+    else if(card.suit === 'CLUB') suit = '♣';
+
+    let rank = card.rank;
+    if (card.rank === 1) rank = 'A';
+    if (card.rank === 11) rank = 'J';
+    if (card.rank === 12) rank = 'Q';
+    if (card.rank === 13) rank = 'K';
+
+    return `[${rank}${suit}]`;
+}
+
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerText = message;
+    container.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.remove();
+    }, 4000);
+}
+
+function addToActionLog(message) {
+    const logContent = document.getElementById('logContent');
+    if (!logContent) return;
+    const entry = document.createElement('div');
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    entry.innerHTML = `<span style="color:var(--primary); font-size:0.7rem;">[${time}]</span> ${message}`;
+    logContent.appendChild(entry);
+    logContent.scrollTop = logContent.scrollHeight;
+}
+
 // DOM Elements
 const lobbyUI = document.getElementById('lobby');
 const gameUI = document.getElementById('gameUI');
@@ -291,12 +331,14 @@ function connectWebSocket() {
     console.log("Connecting to WebSocket...");
     let socket = new SockJS('/ws');
     stompClient = Stomp.over(socket);
-    stompClient.debug = null; // Set to console.log if you need to see STOMP frames
+    stompClient.debug = null; 
     
     stompClient.connect({}, function (frame) {
         console.log("Connected: " + frame);
         stompClient.subscribe('/topic/auction/' + currentGameId, function (message) {
-            gameState = JSON.parse(message.body);
+            const newState = JSON.parse(message.body);
+            handleStateTransition(newState);
+            gameState = newState;
             renderBoard();
         });
         
@@ -311,8 +353,81 @@ function connectWebSocket() {
             .catch(err => console.error("Error fetching state:", err));
     }, function(error) {
         console.error("STOMP error", error);
-        // Retry logic or alert
     });
+}
+
+function handleStateTransition(newState) {
+    if (!gameState) return;
+
+    // 1. Detect Individual Actions (Bidding) FIRST while still in BIDDING phase or transitioning out
+    newState.players.forEach(newP => {
+        const oldP = gameState.players.find(p => p.id === newP.id);
+        if (oldP && newP.hasBid && !oldP.hasBid) {
+            addToActionLog(`✉️ <b>${newP.name}</b> ลงประมูลแล้ว`);
+            if (newP.id === myPlayerId) showToast("Bid placed!", "success");
+        }
+    });
+
+    // 2. Phase Change Notifications
+    if (newState.phase !== gameState.phase) {
+        if (newState.phase === "RESOLUTION") {
+            // Log that bidding is complete BEFORE showing results
+            showToast("Bidding Complete! Revealing cards...", "success");
+            addToActionLog("🔮 <b>การประมูลสิ้นสุด</b> เริ่มการตัดสินผล!");
+
+            // Detect Auto-skills (Q, K) for the winner - only if transition just happened
+            const winner = newState.players.find(p => p.isFirstPlace);
+            if (winner && winner.currentBid) {
+                const rank = winner.currentBid.rank;
+                if (rank === 12) { // Queen
+                    addToActionLog(`👸 <b>${winner.name}</b> ใช้พลัง Queen จั่วไพ่เพิ่ม 1 ใบขึ้นมือ!`);
+                    if (winner.id === myPlayerId) showToast("Queen's Power: +1 Card in hand", "success");
+                } else if (rank === 13) { // King
+                    addToActionLog(`🤴 <b>${winner.name}</b> ใช้พลัง King จั่วไพ่เพิ่ม 1 ใบลงกองคะแนน!`);
+                    if (winner.id === myPlayerId) showToast("King's Power: +1 Card in score pile", "success");
+                }
+            }
+
+            // Detect Ace Underdog
+            const underdog = newState.players.find(p => p.isUnderdog);
+            if (underdog && underdog.currentBid && underdog.currentBid.rank === 1 && !newState.blackEvent) {
+                addToActionLog(`💀 <b>${underdog.name}</b> เปิดตำนาน Ace Underdog รับแต้มพิเศษ!`);
+                if (underdog.id === myPlayerId) showToast("Ace Underdog: 20 pts!", "warning");
+            }
+        } else if (newState.phase === "BIDDING") {
+            showToast("New Bidding Round Started!", "info");
+            addToActionLog("🎭 <b>รอบใหม่เริ่มขึ้นแล้ว</b> โปรดวางหมากของท่าน");
+        } else if (newState.phase === "J_SKILL") {
+            const pickerId = newState.pickOrderPlayerIds[0];
+            const picker = newState.players.find(p => p.id === pickerId);
+            if (picker) {
+                showToast(`${picker.name} is using Jack's Skill!`, "warning");
+                addToActionLog(`🃏 <b>${picker.name}</b> กำลังใช้พลังของ Jack`);
+            }
+        } else if (newState.phase === "ROUND_END") {
+            addToActionLog("🏆 <b>จบรอบใหญ่</b> กำลังสรุปคะแนน...");
+        }
+    }
+
+    // 3. Picking from Market detection
+    if (gameState.phase === "RESOLUTION" && newState.market.length < gameState.market.length) {
+        const lastPickerId = gameState.pickOrderPlayerIds[0];
+        const picker = newState.players.find(p => p.id === lastPickerId);
+        const pickedCard = gameState.market.find(c => !newState.market.some(nc => nc.id === c.id));
+        if (picker && pickedCard) {
+            addToActionLog(`🎁 <b>${picker.name}</b> เลือก ${getCardName(pickedCard)} เข้ากองคะแนน`);
+            if (picker.id === myPlayerId) showToast(`You picked ${getCardName(pickedCard)}`, "success");
+        }
+    }
+
+    // 4. J Skill completion
+    if (gameState.phase === "J_SKILL" && newState.phase !== "J_SKILL") {
+        const pickerId = gameState.pickOrderPlayerIds[0];
+        const picker = newState.players.find(p => p.id === pickerId);
+        if (picker) {
+            addToActionLog(`🃏 <b>${picker.name}</b> ใช้เล่ห์เหลี่ยมสลับไพ่ในตลาดเสร็จสิ้น`);
+        }
+    }
 }
 
 function sendAction(type, sourceId) {
@@ -447,8 +562,14 @@ function renderBoard() {
                 cardEl = createCardDOM(p.currentBid);
             }
             
-            if (p.isFirstPlace) cardEl.style.boxShadow = "0 0 15px #eab308";
-            if (p.isUnderdog) cardEl.style.filter = "grayscale(80%)";
+            if (p.isFirstPlace) {
+                cardEl.style.boxShadow = "0 0 20px 5px #eab308";
+                cardEl.classList.add("highlight-target");
+            }
+            if (p.isUnderdog) {
+                cardEl.style.filter = "grayscale(80%)";
+                cardEl.style.boxShadow = "0 0 15px #ef4444";
+            }
 
             bidContainer.appendChild(nameTag);
             bidContainer.appendChild(cardEl);
@@ -539,47 +660,39 @@ function renderBoard() {
 function renderScoreboard() {
     scoreTitle.innerText = gameState.phase === "GAME_OVER" ? "🏁 Final Results" : (gameState.phase === "LEGACY_PICK" ? "🌟 Pick Legacy Card" : `🏆 Round ${gameState.round} Results`);
     scoreList.innerHTML = '';
+    scoreList.className = "scoreboard-container";
     
-    // Sort players by total score for final, or round score for round end?
-    // Let's show both.
     let sortedPlayers = [...gameState.players].sort((a, b) => b.totalScore - a.totalScore);
     
     sortedPlayers.forEach((p, index) => {
         let pRow = document.createElement('div');
-        pRow.style.padding = "10px";
-        pRow.style.marginBottom = "5px";
-        pRow.style.background = "rgba(255,255,255,0.05)";
-        pRow.style.borderRadius = "8px";
-        pRow.style.display = "flex";
-        pRow.style.justifyContent = "space-between";
-        pRow.style.alignItems = "center";
-        pRow.style.cursor = "pointer";
-        pRow.title = "Click for details";
+        pRow.className = `score-item ${index === 0 ? 'winner' : ''} ${p.poor ? 'underdog-row' : ''}`;
         
-        let rankLabel = index === 0 ? "🥇 " : (index === sortedPlayers.length - 1 ? "🥉 " : "");
-        let legacyTag = p.rich ? ' <span style="color:#fbbf24; font-size:0.7rem;">(เจ้าสัว)</span>' : (p.poor ? ' <span style="color:#ef4444; font-size:0.7rem;">(ยาจก)</span>' : '');
-        let pickedStatus = p.legacyCardId ? ' <span style="color:#22c55e; font-size:0.7rem;">✓ Picked</span>' : ' <span style="color:#94a3b8; font-size:0.7rem;">(Picking...)</span>';
+        let rankBadgeClass = `rank-badge rank-${Math.min(index + 1, 3)}`;
+        let rankLabel = index + 1;
+        
+        let legacyBadge = p.rich ? ' <span class="badge-legacy legacy-rich">เจ้าสัว</span>' : (p.poor ? ' <span class="badge-legacy legacy-poor">ยาจก</span>' : '');
+        let pickedStatus = p.legacyCardId ? ' <span style="color:#22c55e; font-size:0.7rem;">✓</span>' : (gameState.phase === "LEGACY_PICK" ? ' <span style="color:#94a3b8; font-size:0.7rem;">⏳</span>' : '');
 
         pRow.innerHTML = `
-            <div>
-                <strong>${rankLabel}${p.name}</strong>${legacyTag}${gameState.phase === "LEGACY_PICK" ? pickedStatus : ''}
-                <div style="font-size:0.6rem; color:#64748b;">(Click to view breakdown)</div>
+            <div style="display:flex; align-items:center;">
+                <div class="score-rank">${rankLabel}</div>
+                <div style="margin-left: 15px;">
+                    <div style="font-weight:bold; font-size:1.1rem;">${p.name}${legacyBadge}</div>
+                    <div style="font-size:0.7rem; color:#94a3b8; font-family:'Outfit', sans-serif;">Click to view cards ${pickedStatus}</div>
+                </div>
             </div>
             <div style="text-align:right;">
-                <div style="font-size:0.8rem; color:#94a3b8;">Round: +${p.roundScore}</div>
-                <div style="font-weight:bold; color:#fbbf24;">Total: ${p.totalScore}</div>
+                <div style="font-size:0.85rem; color:#94a3b8;">Round: +${p.roundScore}</div>
+                <div style="font-weight:bold; color:#fbbf24; font-size:1.2rem; font-family:'Cinzel', serif;">${p.totalScore} <span style="font-size:0.6rem;">PTS</span></div>
             </div>
         `;
 
-        pRow.onclick = () => {
-            showScoreBreakdown(p);
-        };
-
+        pRow.onclick = () => showScoreBreakdown(p);
         scoreList.appendChild(pRow);
     });
 
     const isHost = gameState.players[0].id === myPlayerId;
-
     if (gameState.phase === "GAME_OVER") {
         btnNextRound.classList.add('hidden');
         btnResetToLobby.classList.toggle('hidden', !isHost);
@@ -593,56 +706,46 @@ function renderScoreboard() {
 
 function showScoreBreakdown(p) {
     let overlay = document.createElement('div');
-    overlay.style.position = "fixed";
-    overlay.style.top = "0"; overlay.style.left = "0";
-    overlay.style.width = "100%"; overlay.style.height = "100%";
-    overlay.style.background = "rgba(0,0,0,0.85)";
-    overlay.style.zIndex = "200";
-    overlay.style.display = "flex";
-    overlay.style.justifyContent = "center";
-    overlay.style.alignItems = "center";
-    overlay.style.backdropFilter = "blur(5px)";
+    overlay.className = "event-overlay";
     overlay.onclick = () => document.body.removeChild(overlay);
 
     let box = document.createElement('div');
-    box.className = "glass-panel";
-    box.style.padding = "30px";
-    box.style.maxWidth = "700px";
+    box.className = "glass-panel bounce-in";
+    box.style.maxWidth = "800px";
     box.style.width = "90%";
+    box.style.padding = "20px";
     box.onclick = (e) => e.stopPropagation();
     
     let html = `
-        <h3 style="color:#fbbf24; margin-top:0; text-align:center; font-size:1.5rem;">🔍 ${p.name}'s Score Details</h3>
-        <div id="breakdownCards" style="display:flex; flex-wrap:wrap; gap:20px; justify-content:center; margin-bottom:20px; max-height:450px; overflow-y:auto; padding:15px; background:rgba(0,0,0,0.3); border-radius:15px;"></div>
+        <h2 style="color:#fbbf24; margin-top:0; text-align:center;">🔍 ${p.name}'s Collection</h2>
+        <div id="breakdownCards" class="score-details-grid" style="max-height:450px; overflow-y:auto; background:rgba(0,0,0,0.3); border-radius:15px; margin-bottom:20px;"></div>
     `;
     
-    // Check for Lucky Suit Bonus from breakdown strings
     if (p.scoreBreakdown && p.scoreBreakdown.some(s => s.includes("Lucky Suit"))) {
-        html += `<div style="text-align:center; color:#fbbf24; font-weight:bold; margin-bottom:15px; font-size:1.1rem; text-shadow:0 0 10px #fbbf24;">🌟 Lucky Suit Bonus: +20 pts</div>`;
+        html += `<div style="text-align:center; color:#fbbf24; font-weight:bold; margin-bottom:15px; font-size:1.2rem; text-shadow:0 0 10px #fbbf24;">🌟 Lucky Suit Bonus: +20 pts</div>`;
     }
     
-    html += `<div style="text-align:center;"><button class="btn-secondary" style="padding:10px 30px;">Close</button></div>`;
+    html += `<div style="text-align:center;"><button class="btn-primary" style="width:200px;">Close</button></div>`;
     box.innerHTML = html;
     
     box.querySelector('button').onclick = () => document.body.removeChild(overlay);
     
     let cardContainer = box.querySelector('#breakdownCards');
     if (p.scorePile.length === 0) {
-        cardContainer.innerHTML = '<div style="color:#94a3b8;">No cards collected this round.</div>';
+        cardContainer.innerHTML = '<div style="grid-column: 1/-1; text-align:center; color:#94a3b8; padding:40px;">No cards collected this round.</div>';
     }
 
-    p.scorePile.forEach(c => {
+    p.scorePile.forEach((c, idx) => {
         let cardWrapper = document.createElement('div');
-        cardWrapper.style.display = "flex";
-        cardWrapper.style.flexDirection = "column";
-        cardWrapper.style.alignItems = "center";
-        cardWrapper.style.gap = "8px";
+        cardWrapper.className = "breakdown-card";
+        cardWrapper.style.animationDelay = `${idx * 0.05}s`;
         
         let el = createCardDOM(c);
-        el.style.transform = "scale(0.9)";
+        el.style.transform = "scale(0.8)";
         el.style.margin = "0";
         
         let pts = c.rank;
+        if (pts > 10) pts = 10;
         let bonusTags = [];
         
         if (c.aceUnderdog) {
@@ -660,9 +763,9 @@ function showScoreBreakdown(p) {
         }
         
         let label = document.createElement('div');
-        label.style.fontSize = "0.9rem";
+        label.style.fontSize = "0.8rem";
         label.style.fontWeight = "bold";
-        label.innerHTML = `${pts} <span style="font-size:0.7rem; font-weight:normal; color:#94a3b8;">pts</span> ${bonusTags.join(' ')}`;
+        label.innerHTML = `${pts} <span style="font-size:0.6rem; color:#94a3b8;">PTS</span><br>${bonusTags.join(' ')}`;
         
         cardWrapper.appendChild(el);
         cardWrapper.appendChild(label);
@@ -746,4 +849,48 @@ function createCardDOM(card) {
         <div class="rank">${rankStr}</div>
     `;
     return div;
+}
+
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerText = message;
+    container.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'fadeOut 0.5s forwards';
+        setTimeout(() => toast.remove(), 500);
+    }, 4000);
+}
+
+function addToActionLog(message) {
+    const logContent = document.getElementById('logContent');
+    if (!logContent) return;
+    const entry = document.createElement('div');
+    entry.style.marginBottom = "5px";
+    entry.style.borderBottom = "1px solid rgba(255,255,255,0.05)";
+    entry.style.paddingBottom = "3px";
+    entry.style.color = "#cbd5e1";
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    entry.innerHTML = `<span style="color:#fbbf24; font-size:0.7rem;">[${time}]</span> ${message}`;
+    logContent.appendChild(entry);
+    logContent.scrollTop = logContent.scrollHeight;
+}
+
+function getCardName(card) {
+    if (!card) return "Unknown Card";
+    let suitSymbol = '♠️';
+    if(card.suit === 'HEART') suitSymbol = '♥️';
+    else if(card.suit === 'DIAMOND') suitSymbol = '♦️';
+    else if(card.suit === 'CLUB') suitSymbol = '♣️';
+    
+    let rankStr = card.rank;
+    if (card.rank === 1) rankStr = 'A';
+    else if (card.rank === 11) rankStr = 'J';
+    else if (card.rank === 12) rankStr = 'Q';
+    else if (card.rank === 13) rankStr = 'K';
+    
+    return `${rankStr}${suitSymbol}`;
 }

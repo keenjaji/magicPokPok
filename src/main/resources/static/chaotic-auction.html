@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ประมูลชุลมุน (The Chaotic Auction)</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/main.css">
     <style>
         .active-event-glow {
@@ -15,6 +15,38 @@
             0% { opacity: 0.8; transform: scale(1); }
             50% { opacity: 1; transform: scale(1.05); }
             100% { opacity: 0.8; transform: scale(1); }
+        }
+        .score-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.3s;
+        }
+        .score-item.winner {
+            background: linear-gradient(135deg, rgba(217, 119, 6, 0.2), rgba(180, 83, 9, 0.4));
+            border-color: #fbbf24;
+            box-shadow: 0 0 15px rgba(251, 191, 36, 0.2);
+            transform: scale(1.02);
+        }
+        .score-rank {
+            width: 24px;
+            height: 24px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        .winner .score-rank {
+            background: #fbbf24;
+            color: #000;
         }
     </style>
 </head>
@@ -145,8 +177,17 @@
         </div>
     </div>
 
+    <div id="actionLog" class="glass-panel">
+        <div class="log-header">🛡️ บันทึกมนตรา (Action Log)</div>
+        <div id="logContent" style="padding: 10px; overflow-y: auto; flex: 1;"></div>
+    </div>
+
+    <!-- Feedback System -->
+    <div id="toastContainer" style="position:fixed; top:20px; right:20px; z-index:2100; display:flex; flex-direction:column; gap:10px;"></div>
+
+
     <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
-    <script src="/auction.js"></script>
+    <script src="/auction.js?v=2"></script>
 </body>
 </html>

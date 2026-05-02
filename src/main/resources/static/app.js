@@ -27,7 +27,6 @@ document.getElementById('btnCreateGame').onclick = async () => {
     let game = await res.json();
     currentGameId = game.gameId;
     
-    // Auto-join after creation
     res = await fetch(`/api/game/join/${currentGameId}?playerName=${myPlayerName}`, { method: 'POST' });
     game = await res.json();
     myPlayerId = game.players[0].id;
@@ -55,7 +54,6 @@ btnEndTurn.onclick = () => {
     sendAction('END_TURN', null, null, null);
 };
 
-// Rules Modal
 document.getElementById('btnRules').onclick = () => {
     document.getElementById('rulesModal').classList.remove('hidden');
 };
@@ -63,7 +61,6 @@ document.getElementById('btnCloseRules').onclick = () => {
     document.getElementById('rulesModal').classList.add('hidden');
 };
 
-// Graveyard Modal Logic
 document.getElementById('btnCloseGraveyard').onclick = () => {
     document.getElementById('graveyardModal').classList.add('hidden');
 };
@@ -76,7 +73,6 @@ function openGraveyardModal() {
     
     grid.innerHTML = '';
     
-    // Determine if we are actively selecting for 9 or 10
     let isSelecting = false;
     let validRanks = [];
     if (selectedSourceCardId) {
@@ -86,7 +82,10 @@ function openGraveyardModal() {
                 sourceCard = p.board.find(c => c.id === selectedSourceCardId);
             }
         });
-        if (sourceCard && sourceCard.rank === 9) {
+        if (sourceCard && sourceCard.rank === 6) {
+            isSelecting = true;
+            validRanks = [3, 5, 7, 9];
+        } else if (sourceCard && sourceCard.rank === 9) {
             isSelecting = true;
             validRanks = [11, 12, 13];
         } else if (sourceCard && sourceCard.rank === 10) {
@@ -107,21 +106,13 @@ function openGraveyardModal() {
         let el = createCardDOM(c, false);
         let isValidTarget = isSelecting && validRanks.includes(c.rank);
         
-        if (isValidTarget) {
-            // Also need to check if they already have the char card for 9
-            if (c.rank >= 11 && c.rank <= 13) {
-                let myChar = gameState.players.find(p => p.id === myPlayerId).board.find(bc => bc.rank === c.rank);
-                if (myChar) isValidTarget = false; // Already have this character
-            }
-        }
-
         if (isSelecting) {
             if (isValidTarget) {
                 el.style.cursor = 'pointer';
                 el.style.boxShadow = "0 0 10px 2px #3b82f6";
                 el.onclick = () => {
                     selectedTargetCardId = c.id;
-                    selectedTargetPlayerId = myPlayerId; // self
+                    selectedTargetPlayerId = myPlayerId; 
                     modal.classList.add('hidden');
                     renderBoard();
                     updateActionBar();
@@ -138,14 +129,13 @@ function openGraveyardModal() {
     modal.classList.remove('hidden');
 }
 
-// Action Bar Logic
 const actionBar = document.getElementById('actionBar');
 const actionStatus = document.getElementById('actionStatus');
 
 function updateActionBar() {
     if (selectedSourceCardId) {
         actionBar.classList.remove('hidden');
-        actionStatus.innerText = `Skill Ready. ${selectedTargetCardId || selectedTargetPlayerId ? '(Target Selected)' : '(Select target if required)'}`;
+        actionStatus.innerText = `เตรียมร่ายมนตรา: ${selectedTargetCardId || selectedTargetPlayerId ? '(เลือกเป้าหมายแล้ว)' : '(โปรดเลือกเป้าหมายที่ต้องการ)'}`;
     } else {
         actionBar.classList.add('hidden');
     }
@@ -180,17 +170,20 @@ function enterGameRoom() {
 function connectWebSocket() {
     let socket = new SockJS('/ws');
     stompClient = Stomp.over(socket);
-    stompClient.debug = null; // Disable spammy logs
+    stompClient.debug = null; 
     stompClient.connect({}, function (frame) {
         stompClient.subscribe('/topic/game/' + currentGameId, function (message) {
-            gameState = JSON.parse(message.body);
+            const newState = JSON.parse(message.body);
+            if (gameState) {
+                processStateChanges(gameState, newState);
+            }
+            gameState = newState;
             renderBoard();
         });
         stompClient.subscribe('/topic/events/' + currentGameId, function (message) {
             showEvent(message.body);
         });
         
-        // Initial fetch to sync rendering
         fetch(`/api/game/${currentGameId}`)
             .then(r => r.json())
             .then(game => {
@@ -200,10 +193,94 @@ function connectWebSocket() {
     });
 }
 
+function processStateChanges(oldState, newState) {
+    if (oldState.currentPlayerIdx !== newState.currentPlayerIdx) {
+        const nextPlayer = newState.players[newState.currentPlayerIdx];
+        if (nextPlayer) {
+            showToast(`ตาของ ${nextPlayer.name} แล้ว!`, 'info');
+            addToActionLog(`🔄 <b>${nextPlayer.name}</b> เริ่มเทิร์นใหม่`);
+        }
+    }
+
+    newState.players.forEach((newP, idx) => {
+        const oldP = oldState.players.find(p => p.id === newP.id);
+        if (!oldP) return;
+
+        newP.board.forEach(newC => {
+            const wasOnBoard = oldP.board.some(oldC => oldC.id === newC.id);
+            if (!wasOnBoard) {
+                const wasInMarket = oldState.market.some(mC => mC.id === newC.id);
+                if (wasInMarket) {
+                    addToActionLog(`🎴 <b>${newP.name}</b> หยิบ ${getCardName(newC)} จากตลาด`);
+                    highlightCard(newC.id, 'highlight-target');
+                } else {
+                    let stolenFrom = null;
+                    oldState.players.forEach(op => {
+                        if (op.id !== newP.id && op.board.some(oc => oc.id === newC.id)) {
+                            stolenFrom = op;
+                        }
+                    });
+                    if (stolenFrom) {
+                        addToActionLog(`💸 <b>${newP.name}</b> ชิง ${getCardName(newC)} มาจาก ${stolenFrom.name}!`);
+                        showToast(`${newP.name} ชิง ${getCardName(newC)} มาได้สำเร็จ!`, 'warning');
+                        highlightCard(newC.id, 'highlight-target');
+                    }
+                }
+            } else {
+                const oldC = oldP.board.find(c => c.id === newC.id);
+                if (!oldC.tapped && newC.tapped) {
+                    addToActionLog(`⚡ <b>${newP.name}</b> ร่ายอาคม ${getCardName(newC)}`);
+                    highlightCard(newC.id, 'highlight-target');
+                }
+            }
+        });
+    });
+
+    if (newState.graveyard.length > oldState.graveyard.length) {
+        const newGraveCard = newState.graveyard[newState.graveyard.length - 1];
+        let previousOwner = null;
+        oldState.players.forEach(p => {
+            if (p.board.some(c => c.id === newGraveCard.id)) previousOwner = p;
+        });
+        
+        if (previousOwner) {
+            addToActionLog(`💀 ${getCardName(newGraveCard)} ของ <b>${previousOwner.name}</b> สลายไปในสุสาน`);
+        }
+    }
+}
+
+function getCardName(card) {
+    let rankStr = card.rank;
+    if (card.rank === 1) rankStr = 'A';
+    if (card.rank === 11) rankStr = 'J';
+    if (card.rank === 12) rankStr = 'Q';
+    if (card.rank === 13) rankStr = 'K';
+    
+    let suitSymbol = '♠️';
+    if(card.suit === 'HEART') suitSymbol = '♥️';
+    else if(card.suit === 'DIAMOND') suitSymbol = '♦️';
+    else if(card.suit === 'CLUB') suitSymbol = '♣️';
+    
+    return `${rankStr}${suitSymbol}`;
+}
+
+function highlightCard(cardId, className) {
+    setTimeout(() => {
+        const elements = document.querySelectorAll(`[data-card-id="${cardId}"]`);
+        elements.forEach(el => {
+            el.classList.add(className);
+            setTimeout(() => el.classList.remove(className), 3000);
+        });
+    }, 150);
+}
+
 function renderBoard() {
     if (!gameState) return;
     
-    // Global Status
+    if (gameState.isGameOver || gameState.gameOver) {
+        showGameOver(gameState.winnerId);
+    }
+
     const isMyTurn = gameState.players[gameState.currentPlayerIdx]?.id === myPlayerId;
     const isGameStarted = gameState.deck.length > 0 || gameState.market.length > 0;
     
@@ -215,68 +292,79 @@ function renderBoard() {
 
     if (!isGameStarted) {
         btnStartGame.classList.remove('hidden');
-        turnIndicator.innerText = `Waiting to start... (${gameState.players.length} joined)`;
+        turnIndicator.innerText = `รอเริ่มการแข่งขัน... (${gameState.players.length} คนเข้าร่วมแล้ว)`;
     } else {
         btnStartGame.classList.add('hidden');
         let currentPName = gameState.players[gameState.currentPlayerIdx].name;
-        turnIndicator.innerText = isMyTurn ? `Your Turn (Actions: ${gameState.players[gameState.currentPlayerIdx].actionsLeft})` : `${currentPName}'s Turn`;
+        turnIndicator.innerText = isMyTurn ? `ตาของคุณ (เหลือ Actions: ${gameState.players[gameState.currentPlayerIdx].actionsLeft})` : `ตาของ ${currentPName}`;
         
         if (isMyTurn) btnEndTurn.classList.remove('hidden');
         else btnEndTurn.classList.add('hidden');
         
         deckCount.innerText = gameState.deck.length;
 
-        // Render Top of Graveyard
-        const graveCount = document.getElementById('graveCount');
         const gravePile = document.getElementById('gravePile');
-        
-        // Ensure gravePile binds to open modal
         gravePile.onclick = () => openGraveyardModal();
         gravePile.style.cursor = 'pointer';
         
-        // Make Zone glow if we have 9 or 10 selected
         let highlightGraveZone = false;
         if (selectedSourceCardId) {
             let myP = gameState.players.find(p => p.id === myPlayerId);
             if (myP) {
                 let sc = myP.board.find(c => c.id === selectedSourceCardId);
-                if (sc && (sc.rank === 9 || sc.rank === 10)) highlightGraveZone = true;
+                if (sc && (sc.rank === 6 || sc.rank === 9 || sc.rank === 10)) highlightGraveZone = true;
             }
         }
         
         if (highlightGraveZone) {
-            gravePile.style.boxShadow = "0 0 20px 5px #eab308"; // Yellow pulse
-            gravePile.title = "Click to select a target!";
+            gravePile.style.boxShadow = "0 0 20px 5px #eab308";
+            gravePile.title = "คลิกเพื่อเลือกเป้าหมายจากสุสาน!";
+            
+            let arrow = document.createElement('div');
+            arrow.className = 'target-arrow';
+            arrow.innerText = '👇';
+            gravePile.appendChild(arrow);
         } else {
             gravePile.style.boxShadow = "none";
             gravePile.title = "";
+            const existingArrow = gravePile.querySelector('.target-arrow');
+            if (existingArrow) existingArrow.remove();
         }
 
         if (gameState.graveyard && gameState.graveyard.length > 0) {
-            graveCount.innerText = gameState.graveyard.length;
+            document.getElementById('graveCount').innerText = gameState.graveyard.length;
             let topGrave = gameState.graveyard[gameState.graveyard.length - 1];
-            // Render it properly inside gravePile
             let mockGraveCard = createCardDOM(topGrave, false);
             gravePile.innerHTML = mockGraveCard.innerHTML;
-            gravePile.className = mockGraveCard.className + " card-disabled"; // ensure disabled styling
+            if (highlightGraveZone) {
+                let arrow = document.createElement('div');
+                arrow.className = 'target-arrow';
+                arrow.innerText = '👇';
+                gravePile.appendChild(arrow);
+            }
+            gravePile.className = mockGraveCard.className + " card-disabled";
         } else {
-            graveCount.innerText = 0;
+            document.getElementById('graveCount').innerText = 0;
             gravePile.className = "card card-disabled";
             gravePile.innerHTML = "Empty";
+            if (highlightGraveZone) {
+                let arrow = document.createElement('div');
+                arrow.className = 'target-arrow';
+                arrow.innerText = '👇';
+                gravePile.appendChild(arrow);
+            }
         }
     }
 
-    // Market
     marketCardsDiv.innerHTML = '';
     gameState.market.forEach(c => {
         let el = createCardDOM(c, true);
         el.onclick = () => {
-            if (isMyTurn) sendAction('TAKE_MARKET', c.id, null, null);
+            if (isMyTurn && !gameState.isGameOver && !gameState.gameOver) sendAction('TAKE_MARKET', c.id, null, null);
         };
         marketCardsDiv.appendChild(el);
     });
 
-    // Players
     playersArea.innerHTML = '';
     gameState.players.forEach((p, idx) => {
         let isCurrent = idx === gameState.currentPlayerIdx;
@@ -285,7 +373,6 @@ function renderBoard() {
         let pdiv = document.createElement('div');
         pdiv.className = `player-dashboard glass-panel ${isCurrent ? 'active-turn' : ''}`;
         
-        // --- Duplicate Detection ---
         let hasDuplicates = false;
         if (isMe) {
             let rankCounts = { 11: [], 12: [], 13: [] };
@@ -305,16 +392,15 @@ function renderBoard() {
         if (isMe && !hasDuplicates) {
             document.getElementById('duplicateDiscardModal').classList.add('hidden');
         }
-        // ---------------------------
         
         let tags = "";
-        if(p.silenced) tags += `<span class="badge badge-silence">Silenced</span> `;
-        if(p.slowed) tags += `<span class="badge badge-slow">Slowed</span>`;
+        if(p.silenced) tags += `<span class="badge badge-silence">ถูกใบ้</span> `;
+        if(p.slowed) tags += `<span class="badge badge-slow">สโลว์</span>`;
 
         pdiv.innerHTML = `
             <div class="player-header">
-                <span>${p.name} ${isMe ? '(You)' : ''} ${tags}</span>
-                <span>Score: ${p.score} | AP: ${p.actionsLeft}</span>
+                <span>${p.name} ${isMe ? '(คุณ)' : ''} ${tags}</span>
+                <span>คะแนน: ${p.score} | AP: ${p.actionsLeft}</span>
             </div>
             <div class="player-board" id="board-${p.id}"></div>
         `;
@@ -324,17 +410,24 @@ function renderBoard() {
         p.board.forEach(c => {
             let el = createCardDOM(c, false);
             
-            // Skill Targeting Logic
-            el.onclick = () => {
-                if (!isMyTurn) return;
+            el.onclick = (e) => {
+                e.stopPropagation();
+                if (!isMyTurn || gameState.isGameOver || gameState.gameOver) return;
                 
                 if (isMe) {
-                    // Selecting my card as Source
                     if (selectedSourceCardId === c.id) {
-                        selectedSourceCardId = null; // deselect
+                        selectedSourceCardId = null;
                         selectedTargetCardId = null;
                         selectedTargetPlayerId = null;
                     } else {
+                        if (c.tapped) {
+                            showToast("ไพ่ใบนี้ถูกใช้งานไปแล้วในเทิร์นนี้", "warning");
+                            return;
+                        }
+                        if (c.disabled) {
+                            showToast("ไพ่ใบนี้ติดสถานะคำสาป ไม่สามารถใช้งานได้", "warning");
+                            return;
+                        }
                         selectedSourceCardId = c.id;
                         selectedTargetCardId = null;
                         selectedTargetPlayerId = null;
@@ -342,37 +435,58 @@ function renderBoard() {
                     renderBoard();
                     updateActionBar();
                 } else if (selectedSourceCardId) {
-                    // Selected opponent's card as Target
-                    selectedTargetCardId = c.id;
-                    selectedTargetPlayerId = p.id;
-                    renderBoard();
-                    updateActionBar();
+                    if (isValidTarget(c, p.id)) {
+                        selectedTargetCardId = c.id;
+                        selectedTargetPlayerId = p.id;
+                        renderBoard();
+                        updateActionBar();
+                    } else {
+                        showToast("เป้าหมายนี้ไม่สามารถรับผลของสกิลนี้ได้", "warning");
+                    }
                 }
             };
 
             if (selectedSourceCardId === c.id) {
-                el.style.boxShadow = "0 0 15px 5px #22c55e"; // Green glow for selected source
+                el.style.boxShadow = "0 0 15px 5px #22c55e";
                 el.style.transform = "translateY(-10px)";
+            } else if (selectedSourceCardId && !isMe && isValidTarget(c, p.id)) {
+                el.style.boxShadow = "0 0 15px #fbbf24";
+                let arrow = document.createElement('div');
+                arrow.className = 'target-arrow';
+                arrow.innerText = '👇';
+                el.appendChild(arrow);
             }
+
             if (selectedTargetCardId === c.id) {
-                el.style.boxShadow = "0 0 15px 5px #ef4444"; // Red glow for selected target
+                el.style.boxShadow = "0 0 15px 5px #ef4444";
                 el.style.transform = "translateY(-10px)";
             }
             
             boardArea.appendChild(el);
         });
         
-        // Allow targeting the player directly
         pdiv.onclick = (e) => {
-            if (!isMyTurn || isMe || !selectedSourceCardId) return;
-            if (e.target.closest('.card')) return; // handled by card click
+            if (!isMyTurn || isMe || !selectedSourceCardId || gameState.isGameOver || gameState.gameOver) return;
             
-            selectedTargetPlayerId = p.id;
-            selectedTargetCardId = null;
-            renderBoard();
-            updateActionBar();
+            if (isValidPlayerTarget(p.id)) {
+                selectedTargetPlayerId = p.id;
+                selectedTargetCardId = null;
+                renderBoard();
+                updateActionBar();
+            } else {
+                showToast("สกิลนี้จำเป็นต้องเลือกเป้าหมายเป็น 'ไพ่' บนบอร์ดเท่านั้น", "warning");
+            }
         }
-        pdiv.style.cursor = selectedSourceCardId && !isMe ? 'crosshair' : 'default';
+        
+        if (selectedSourceCardId && !isMe && isValidPlayerTarget(p.id)) {
+             pdiv.classList.add('valid-player-target');
+             let arrow = document.createElement('div');
+             arrow.className = 'target-arrow';
+             arrow.style.top = "-50px";
+             arrow.innerText = '🎯';
+             pdiv.appendChild(arrow);
+        }
+
         if(selectedTargetPlayerId === p.id && !selectedTargetCardId) {
             pdiv.style.borderColor = "#ef4444";
             pdiv.style.boxShadow = "0 0 15px rgba(239, 68, 68, 0.4)";
@@ -380,17 +494,48 @@ function renderBoard() {
     });
 }
 
+function isValidTarget(card, ownerId) {
+    if (!selectedSourceCardId) return false;
+    let myP = gameState.players.find(p => p.id === myPlayerId);
+    let srcCard = myP.board.find(c => c.id === selectedSourceCardId);
+    if (!srcCard) return false;
+
+    switch (srcCard.rank) {
+        case 11: // Jack
+            return true; 
+        case 12: // Queen
+            return true;
+        case 2: // Curse
+            return false;
+    }
+    return false;
+}
+
+function isValidPlayerTarget(targetPId) {
+    if (!selectedSourceCardId) return false;
+    let myP = gameState.players.find(p => p.id === myPlayerId);
+    let srcCard = myP.board.find(c => c.id === selectedSourceCardId);
+    if (!srcCard) return false;
+
+    return [2, 3, 7, 5, 11, 12].includes(srcCard.rank);
+}
+
+function showGameOver(winnerId) {
+    const winner = gameState.players.find(p => p.id === winnerId);
+    const winnerName = winner ? winner.name : "Unknown";
+    showEvent(`🏆 จบการแข่งขัน! 🏆\nผู้ชนะคือ: ${winnerName}`);
+}
+
 function createCardDOM(card, isMarket) {
     let div = document.createElement('div');
+    div.setAttribute('data-card-id', card.id);
     
-    // Classes
     let isRed = card.suit === 'HEART' || card.suit === 'DIAMOND';
     div.className = `card ${isRed ? 'red' : 'black'}`;
     if (card.tapped) div.classList.add('card-tapped');
     if (card.resurrected) div.classList.add('card-resurrected');
     if (card.disabled) div.classList.add('card-disabled');
 
-    // Display values
     let suitSymbol = '♠️';
     if(card.suit === 'HEART') suitSymbol = '♥️';
     else if(card.suit === 'DIAMOND') suitSymbol = '♦️';
@@ -443,9 +588,8 @@ function showDuplicateDiscardModal(cards) {
         let el = createCardDOM(c, false);
         el.style.cursor = 'pointer';
         el.onclick = () => {
-            // Send discard action
             sendAction('DISCARD_DUPLICATE', c.id, null, null);
-            modal.classList.add('hidden'); // optimistic hide
+            modal.classList.add('hidden');
         };
         container.appendChild(el);
     });
@@ -453,12 +597,35 @@ function showDuplicateDiscardModal(cards) {
     modal.classList.remove('hidden');
 }
 
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerText = message;
+    container.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.remove();
+    }, 4000);
+}
+
+function addToActionLog(message) {
+    const logContent = document.getElementById('logContent');
+    const entry = document.createElement('div');
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    entry.innerHTML = `<span style="color:var(--primary); font-size:0.7rem;">[${time}]</span> ${message}`;
+    logContent.appendChild(entry);
+    logContent.scrollTop = logContent.scrollHeight;
+}
+
 function showEvent(text) {
+    addToActionLog(`✨ ${text}`);
+    showToast(text, 'warning');
+
     const overlay = document.getElementById('eventOverlay');
     document.getElementById('eventText').innerText = text;
     overlay.classList.remove('hidden');
     
-    // Hide after 5 seconds
     setTimeout(() => {
         overlay.classList.add('hidden');
     }, 5000);

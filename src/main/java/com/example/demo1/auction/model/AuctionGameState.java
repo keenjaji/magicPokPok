@@ -1,13 +1,13 @@
 package com.example.demo1.auction.model;
 
-import java.util.ArrayList;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.List;
 
 public class AuctionGameState {
     private String gameId;
-    private List<AuctionPlayer> players = new ArrayList<>();
-    private List<AuctionCard> deck = new ArrayList<>();
-    private List<AuctionCard> market = new ArrayList<>();
+    private List<AuctionPlayer> players = new CopyOnWriteArrayList<>();
+    private List<AuctionCard> deck = new CopyOnWriteArrayList<>();
+    private List<AuctionCard> market = new CopyOnWriteArrayList<>();
     private AuctionCard masterCard;
     
     private String phase = "WAITING_FOR_PLAYERS"; // WAITING_FOR_PLAYERS, MASTER_REVEAL, BIDDING, RESOLUTION, ROUND_END, GAME_OVER
@@ -15,10 +15,10 @@ public class AuctionGameState {
     private int subRound = 1;
     
     // Pick queue for resolution phase
-    private List<String> pickOrderPlayerIds = new ArrayList<>();
+    private List<String> pickOrderPlayerIds = new CopyOnWriteArrayList<>();
     
     // Jack Skill state
-    private List<AuctionCard> jackSkillOptions = new ArrayList<>();
+    private List<AuctionCard> jackSkillOptions = new CopyOnWriteArrayList<>();
     
     // Settings
     private int initialHandSize = 6;
